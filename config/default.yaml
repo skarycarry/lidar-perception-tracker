@@ -1,0 +1,27 @@
+data:
+  source: "~/kitti_dataset/"
+  output_topic: "/lidar_perception_tracker/streams/pointcloud"
+  publish_rate: 10.0
+
+preprocessing:
+  voxel_size: [0.2, 0.2, 0.2]
+  min_points_per_voxel: 5
+  max_points_per_voxel: 20
+  max_voxels: 20000
+
+detection:
+  model_path: "models/pointpillars.pth"
+  confidence_threshold: 0.5
+  nms_iou_threshold: 0.5
+  max_detections_per_frame: 100
+
+tracking:
+  max_age: 5
+  min_hits: 3
+  iou_threshold: 0.3
+  max_distance: 2.0
+  use_kalman_filter: true
+  kalman_process_noise: 1e-5
+  kalman_measurement_noise: 1e-2
+  kalman_initial_state_covariance: 1.0
+  kalman_initial_measurement_covariance: 1.0

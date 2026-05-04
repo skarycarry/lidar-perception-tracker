@@ -10,11 +10,15 @@ preprocessing:
   max_voxels: 20000
 
 detection:
-  model_path: "models/pointpillars.pth"
-  confidence_threshold: 0.5
-  nms_iou_threshold: 0.5
-  max_detections_per_frame: 100
-
+  mode: "pointpillars"
+  pointpillars:
+    model_path: "models/pointpillars.pth"
+    nms_iou_threshold: 0.5
+    confidence_threshold: 0.5
+  euclidean:
+    clustering_eps: 0.5
+    clustering_min_samples: 10
+  
 tracking:
   max_age: 5
   min_hits: 3

@@ -1,7 +1,6 @@
 build
 install
 log
-data/
 **/__pycache__/
 *.egg
 *.egg-info/
@@ -9,3 +8,4 @@ setup.py
 setup.cfg
 package.xml
 .vscode/
+.venv/

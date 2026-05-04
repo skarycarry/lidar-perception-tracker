@@ -10,14 +10,15 @@ preprocessing:
   max_voxels: 20000
 
 detection:
-  mode: "pointpillars"
-  pointpillars:
+  mode: "point_pillars"
+  point_pillars:
     model_path: "models/pointpillars.pth"
-    nms_iou_threshold: 0.5
-    confidence_threshold: 0.5
+    nms_threshold: 0.5
+    conf_threshold: 0.5
+    device: "cuda"
   euclidean:
-    clustering_eps: 0.5
-    clustering_min_samples: 10
+    eps: 0.5
+    min_points: 10
   
 tracking:
   max_age: 5

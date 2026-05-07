@@ -1,8 +1,10 @@
 from .kalman import KalmanFilter3D
+from lidar_tracker.core.detection.base import Detection
 
 class Track:
-    def __init__(self, initial_state, min_hits=3, max_age=5, track_id=None):
-        self.kalman_filter = KalmanFilter3D(initial_state)
+    def __init__(self, initial_detection: Detection, min_hits=3, max_age=5, track_id=None):
+        self.kalman_filter = KalmanFilter3D(initial_detection.initial_track_state)
+        self.last_detection = initial_detection
         self.track_id = track_id
         self.hits = 1
         self.age = 0
@@ -19,8 +21,9 @@ class Track:
         self.age += 1
         self.time_since_update += 1
 
-    def update(self, measurement):
-        self.kalman_filter.update(measurement)
+    def update(self, detection: Detection):
+        self.kalman_filter.update(detection.position)
+        self.last_detection = detection
         self.hits += 1
         self.time_since_update = 0
 

@@ -22,6 +22,18 @@ class Detection:
     def initial_track_state(self) -> np.ndarray:
         return np.array([self.x, self.y, self.z, 0.0, 0.0, 0.0])
 
+    @property
+    def bounds(self) -> tuple[float, float, float, float, float, float]:
+        return (
+            self.x - self.length / 2, self.x + self.length / 2,
+            self.y - self.width / 2,  self.y + self.width / 2,
+            self.z,                   self.z + self.height,
+        )
+
+    @property
+    def volume(self) -> float:
+        return self.height * self.width * self.length
+
 class Detector(ABC):
     @abstractmethod
     def detect(self, lidar_points: np.ndarray) -> list[Detection]:

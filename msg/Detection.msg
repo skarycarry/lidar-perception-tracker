@@ -1,0 +1,9 @@
+float64 x
+float64 y
+float64 z
+float64 height
+float64 width
+float64 length
+float64 rotation_y
+float64 confidence
+string object_type

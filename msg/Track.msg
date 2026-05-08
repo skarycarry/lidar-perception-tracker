@@ -1,0 +1,11 @@
+float64 x
+float64 y
+float64 z
+float64 vx
+float64 vy
+float64 vz
+float64 height
+float64 width
+float64 length
+float64 rotation_y
+int32 track_id

@@ -1,19 +1,23 @@
-from lidar_tracker.core.detection import Detection
-from lidar_tracker.core.tracking import Track
+from typing import Protocol
 
-def iou_3d(track: Track, detection: Detection) -> float:
-    track_detection = track.last_detection
-    track_x_min, track_x_max, track_y_min, track_y_max, track_z_min, track_z_max = track_detection.bounds
-    detection_x_min, detection_x_max, detection_y_min, detection_y_max, detection_z_min, detection_z_max = detection.bounds
 
-    x_overlap = max(0, min(track_x_max, detection_x_max) - max(track_x_min, detection_x_min))
-    y_overlap = max(0, min(track_y_max, detection_y_max) - max(track_y_min, detection_y_min))
-    z_overlap = max(0, min(track_z_max, detection_z_max) - max(track_z_min, detection_z_min))
+class BoundedBox(Protocol):
+    @property
+    def bounds(self) -> tuple[float, float, float, float, float, float]: ...
+    @property
+    def volume(self) -> float: ...
 
-    intersection_volume = x_overlap * y_overlap * z_overlap
-    track_volume = track_detection.volume
-    detection_volume = detection.volume
-    union_volume = track_volume + detection_volume - intersection_volume
-    if union_volume == 0:
+
+def iou_3d(box_a: BoundedBox, box_b: BoundedBox) -> float:
+    ax_min, ax_max, ay_min, ay_max, az_min, az_max = box_a.bounds
+    bx_min, bx_max, by_min, by_max, bz_min, bz_max = box_b.bounds
+
+    x_overlap = max(0, min(ax_max, bx_max) - max(ax_min, bx_min))
+    y_overlap = max(0, min(ay_max, by_max) - max(ay_min, by_min))
+    z_overlap = max(0, min(az_max, bz_max) - max(az_min, bz_min))
+
+    intersection = x_overlap * y_overlap * z_overlap
+    union = box_a.volume + box_b.volume - intersection
+    if union == 0:
         return 0.0
-    return intersection_volume / union_volume
+    return intersection / union

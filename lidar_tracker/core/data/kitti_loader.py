@@ -22,6 +22,18 @@ class KittiDetection:
     z: float
     rotation_y: float
 
+    @property
+    def bounds(self) -> tuple[float, float, float, float, float, float]:
+        return (
+            self.x - self.length / 2, self.x + self.length / 2,
+            self.y - self.width / 2,  self.y + self.width / 2,
+            self.z,                   self.z + self.height,
+        )
+
+    @property
+    def volume(self) -> float:
+        return self.height * self.width * self.length
+
 
 def load_lidar_frames(dir_path: Path) -> Iterator[np.ndarray]:
     for file in sorted(dir_path.iterdir()):

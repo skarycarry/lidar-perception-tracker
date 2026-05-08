@@ -47,5 +47,5 @@ class Sort3D:
         iou_matrix = np.zeros((len(tracks), len(detections)))
         for i, track in enumerate(tracks):
             for j, det in enumerate(detections):
-                iou_matrix[i, j] = iou_3d(track, det)
+                iou_matrix[i, j] = iou_3d(track.last_detection, det)
         return iou_matrix

@@ -7,7 +7,7 @@ A full-stack LiDAR perception and multi-object tracking pipeline. Supports two d
 Three core components:
 - **Data ingestion** — loads KITTI velodyne frames and calibration, or generates synthetic scenes for testing
 - **Object detection** — euclidean clustering or PointPillars, switchable via config
-- **Multi-object tracking** — SORT-3D correlates detections across frames using IoU-based association
+- **Multi-object tracking** — SORT-3D correlates detections across frames using 3D centre-distance association
 
 The `core/` layer is pure Python with zero ROS imports and is fully unit-testable. ROS2 nodes in `nodes/` are thin wrappers around core.
 
@@ -64,7 +64,30 @@ source /opt/ros/jazzy/setup.bash
 ros2 launch launch/pipeline.launch.py dataset_path:=~/kitti_dataset
 ```
 
-Detection mode is set in `config/default.yaml` under `detection.mode` — either `euclidean` or `pointpillars`.
+Detection mode is set in `config/default.yaml` under `detection.mode` — either `euclidean` or `point_pillars`.
+
+## PointPillars Pretrained Weights
+
+Weights are not included in this repo. The recommended source is the **OpenPCDet model zoo**
+(https://github.com/open-mmlab/OpenPCDet — see `docs/MODEL_ZOO.md`).
+
+Download the KITTI `pointpillar` checkpoint and place it at:
+```
+models/pointpillar_7728.pth
+```
+
+The `models/` directory is git-ignored. Update `config/default.yaml` if you use a different path:
+```yaml
+detection:
+  point_pillars:
+    model_path: "models/pointpillar_7728.pth"
+```
+
+The `PointPillarsDetector` is a self-contained PyTorch re-implementation of the PointPillars
+architecture (PillarVFE → PointPillarScatter → BaseBEVBackbone → AnchorHeadSingle) that loads
+OpenPCDet `.pth` checkpoints directly — **no OpenPCDet or spconv installation required**.
+The implementation matches OpenPCDet's layer naming convention exactly so state dicts load
+without remapping.
 
 ## Running Tests
 
@@ -75,9 +98,9 @@ pytest tests/
 ## Eval Metrics
 
 - **MOTA** (Multiple Object Tracking Accuracy): `1 - (FN + FP + IDSW) / GT` — penalizes missed detections, false positives, and identity switches
-- **MOTP** (Multiple Object Tracking Precision): mean localization error across all true positive matches — measures how accurately detections are placed
+- **MOTP** (Multiple Object Tracking Precision): mean centre-distance (metres) of matched pairs — measures how accurately detections are localised
 
-IoU threshold for matching: 0.5 (configurable via `tracking.iou_threshold`).
+Matching uses 3D centre distance rather than IoU. The threshold (default 2.0 m) is configurable via `tracking.match_distance` and `evaluation.match_distance`.
 
 ## Future Extensions
 

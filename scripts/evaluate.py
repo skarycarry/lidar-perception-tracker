@@ -88,7 +88,8 @@ def main():
     pre_cfg = config['preprocessing']
 
     detector = create_detector(CONFIG_PATH)
-    trk_cfg = config['tracking']
+    mode = config['detection']['mode']
+    trk_cfg = config['tracking'][mode]
     tracker = Sort3D(
         max_age=trk_cfg['max_age'],
         min_hits=trk_cfg['min_hits'],
@@ -99,12 +100,14 @@ def main():
     all_detections: dict[int, list] = {}
     frame_files = sorted(velodyne_dir.glob('*.bin'))
 
-    print(f'Processing {len(frame_files)} frames...')
+    do_preprocess = detector.needs_external_preprocessing
+    print(f'Processing {len(frame_files)} frames... (preprocessing: {do_preprocess})')
     for frame_idx, bin_file in enumerate(frame_files):
         points = np.fromfile(bin_file, dtype=np.float32).reshape(-1, 4)
-        points = range_crop(points, pre_cfg['min_distance'], pre_cfg['max_distance'])
-        points = remove_ground(points, pre_cfg['ground_threshold'])
-        points = voxel_downsample(points, pre_cfg['voxel_size'])
+        if do_preprocess:
+            points = range_crop(points, pre_cfg['min_distance'], pre_cfg['max_distance'])
+            points = remove_ground(points, pre_cfg['ground_threshold'])
+            points = voxel_downsample(points, pre_cfg['voxel_size'])
         detections = detector.detect(points)
         tracks = tracker.update(detections, dt=0.1)
         all_tracks[frame_idx] = list(tracks)

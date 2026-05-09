@@ -35,6 +35,10 @@ class Detection:
         return self.height * self.width * self.length
 
 class Detector(ABC):
+    # Subclasses that do their own internal preprocessing should set this False
+    # so callers skip the external ground-removal / voxel-downsample pipeline.
+    needs_external_preprocessing: bool = True
+
     @abstractmethod
     def detect(self, lidar_points: np.ndarray) -> list[Detection]:
         pass

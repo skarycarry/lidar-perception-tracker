@@ -17,9 +17,13 @@ class DetectionNode(Node):
         super().__init__('detection_node')
         config_path = Path(get_package_share_directory('lidar_perception_tracker')) / 'config' / 'default.yaml'
         self.config = yaml.safe_load(config_path.read_text())
-        self.subscribe_topic = self.config['preprocessing']['output_topic']
         self.publish_topic = self.config['detection']['output_topic']
         self.detector = create_detector(config_path)
+        # PointPillars handles its own preprocessing internally; subscribe to raw cloud
+        if self.detector.needs_external_preprocessing:
+            self.subscribe_topic = self.config['preprocessing']['output_topic']
+        else:
+            self.subscribe_topic = self.config['data']['output_topic']
         self.publisher_ = self.create_publisher(DetectionArray, self.publish_topic, 10)
         self.subscription = self.create_subscription(PointCloud2, self.subscribe_topic, self.point_cloud_callback, 10)
         self.get_logger().info(f'DetectionNode initialized. Subscribing to {self.subscribe_topic} and publishing to {self.publish_topic}')

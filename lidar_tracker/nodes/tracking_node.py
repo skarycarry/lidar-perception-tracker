@@ -18,10 +18,12 @@ class TrackingNode(Node):
         self.config = yaml.safe_load(config_path.read_text())
         self.subscribe_topic = self.config['detection']['output_topic']
         self.publish_topic = self.config['tracking']['output_topic']
+        mode = self.config['detection']['mode']
+        trk_cfg = self.config['tracking'][mode]
         self.tracker = Sort3D(
-            max_age=self.config['tracking']['max_age'],
-            min_hits=self.config['tracking']['min_hits'],
-            match_distance=self.config['tracking']['match_distance'],
+            max_age=trk_cfg['max_age'],
+            min_hits=trk_cfg['min_hits'],
+            match_distance=trk_cfg['match_distance'],
         )
         self.last_timestamp = None
         self.prev_track_count = 0

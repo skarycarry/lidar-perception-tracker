@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import PointCloud2
@@ -6,17 +7,19 @@ from std_msgs.msg import Header
 
 from pathlib import Path
 import yaml
-from lidar_tracker.core.data.kitti_loader import load_velodyne_frames
+from ament_index_python.packages import get_package_share_directory
+from lidar_tracker.core.data.kitti_loader import load_lidar_frames
 
 class DataNode(Node):
     def __init__(self):
         super().__init__('data_node')
-        self.config = yaml.safe_load((Path(__file__).parent.parent.parent / 'config' / 'default.yaml').read_text())
+        config_path = Path(get_package_share_directory('lidar_perception_tracker')) / 'config' / 'default.yaml'
+        self.config = yaml.safe_load(config_path.read_text())
         self.publish_rate = self.config['data']['publish_rate']
         self.topic = self.config['data']['output_topic']
         self.publisher_ = self.create_publisher(PointCloud2, self.topic, 10)
         self.timer = self.create_timer(1.0 / self.publish_rate, self.publish_point_cloud)
-        self.frames = load_velodyne_frames(Path(self.config['data']['source']).expanduser() / 'training' / 'velodyne')
+        self.frames = load_lidar_frames(Path(self.config['data']['source']).expanduser() / 'training' / 'velodyne')
 
     def publish_point_cloud(self):
         try:
@@ -26,10 +29,10 @@ class DataNode(Node):
             header.frame_id = 'lidar_frame'
             points = [(point[0], point[1], point[2], point[3]) for point in frame]
             pc2_msg = point_cloud2.create_cloud(header, fields=[
-                point_cloud2.PointField('x', 0, point_cloud2.PointField.FLOAT32, 1),
-                point_cloud2.PointField('y', 4, point_cloud2.PointField.FLOAT32, 1),
-                point_cloud2.PointField('z', 8, point_cloud2.PointField.FLOAT32, 1),
-                point_cloud2.PointField('intensity', 12, point_cloud2.PointField.FLOAT32, 1),
+                point_cloud2.PointField(name='x', offset=0, datatype=point_cloud2.PointField.FLOAT32, count=1),
+                point_cloud2.PointField(name='y', offset=4, datatype=point_cloud2.PointField.FLOAT32, count=1),
+                point_cloud2.PointField(name='z', offset=8, datatype=point_cloud2.PointField.FLOAT32, count=1),
+                point_cloud2.PointField(name='intensity', offset=12, datatype=point_cloud2.PointField.FLOAT32, count=1),
             ], points=points)
             self.publisher_.publish(pc2_msg)
         except StopIteration:

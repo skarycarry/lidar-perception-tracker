@@ -36,10 +36,9 @@ class KittiDetection:
 
 
 def load_lidar_frames(dir_path: Path) -> Iterator[np.ndarray]:
-    for file in sorted(dir_path.iterdir()):
-        if file.suffix == '.bin':
-            lidar_points = np.fromfile(file, dtype=np.float32).reshape(-1, 4)
-            yield lidar_points
+    for file in sorted(dir_path.rglob('*.bin')):
+        lidar_points = np.fromfile(file, dtype=np.float32).reshape(-1, 4)
+        yield lidar_points
 
 def load_calibration(calib_file: Path) -> KittiCalibration:
     with open(calib_file, 'r') as f:
@@ -47,13 +46,17 @@ def load_calibration(calib_file: Path) -> KittiCalibration:
     
     calib_data = {}
     for line in lines:
-        if ':' not in line:
+        line = line.strip()
+        if not line:
             continue
-        key, value = line.split(':', 1)
-        calib_data[key.strip()] = np.array([float(x) for x in value.strip().split()])
+        sep = ':' if ':' in line else ' '
+        key, value = line.split(sep, 1)
+        values = [float(x) for x in value.strip().split() if x]
+        if values:
+            calib_data[key.strip()] = np.array(values)
     
-    velo_to_cam = calib_data['Tr_velo_to_cam'].reshape(3, 4)
-    rect = calib_data['R0_rect'].reshape(3, 3)
+    velo_to_cam = calib_data['Tr_velo_cam'].reshape(3, 4)
+    rect = calib_data['R_rect'].reshape(3, 3)
     proj_matrix = calib_data['P2'].reshape(3, 4)
     
     return KittiCalibration(velo_to_cam=velo_to_cam, rect=rect, proj_matrix=proj_matrix)

@@ -7,11 +7,33 @@ endif()
 
 # find dependencies
 find_package(ament_cmake REQUIRED)
+find_package(ament_cmake_python REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
+find_package(std_msgs REQUIRED)
 
 rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/Detection.msg"
   "msg/Track.msg"
+  "msg/DetectionArray.msg"
+  "msg/TrackArray.msg"
+  DEPENDENCIES std_msgs
+)
+
+ament_python_install_package(lidar_tracker)
+
+install(PROGRAMS lidar_tracker/nodes/data_node.py
+  DESTINATION lib/${PROJECT_NAME} RENAME data_node)
+install(PROGRAMS lidar_tracker/nodes/preprocessing_node.py
+  DESTINATION lib/${PROJECT_NAME} RENAME preprocessing_node)
+install(PROGRAMS lidar_tracker/nodes/detection_node.py
+  DESTINATION lib/${PROJECT_NAME} RENAME detection_node)
+install(PROGRAMS lidar_tracker/nodes/tracking_node.py
+  DESTINATION lib/${PROJECT_NAME} RENAME tracking_node)
+install(PROGRAMS lidar_tracker/nodes/visualization_node.py
+  DESTINATION lib/${PROJECT_NAME} RENAME visualization_node)
+
+install(DIRECTORY launch config rviz
+  DESTINATION share/${PROJECT_NAME}
 )
 
 if(BUILD_TESTING)

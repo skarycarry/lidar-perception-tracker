@@ -9,3 +9,8 @@ setup.cfg
 package.xml
 .vscode/
 .venv/
+*.log
+*.csv
+*.gv
+*.pdf
+models/

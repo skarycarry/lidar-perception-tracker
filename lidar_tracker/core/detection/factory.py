@@ -1,22 +1,29 @@
 import yaml
 from pathlib import Path
 from .base import Detector
-from .euclidean import EuclideanDetector
-from .point_pillars import PointPillarsDetector
 
 def create_detector(config_path: Path) -> Detector:
     with open(config_path, 'r') as f:
         config = yaml.safe_load(f)
-    
-    if config['detection']['mode'] == 'euclidean':
-        eps = config['detection']['euclidean']['eps']
-        min_points = config['detection']['euclidean']['min_points']
-        return EuclideanDetector(eps=eps, min_points=min_points)
-    elif config['detection']['mode'] == 'point_pillars':
+
+    mode = config['detection']['mode']
+    if mode == 'euclidean':
+        from .euclidean import EuclideanDetector
+        ecfg = config['detection']['euclidean']
+        return EuclideanDetector(
+            eps=ecfg['eps'],
+            min_points=ecfg['min_points'],
+            min_h=ecfg['min_h'], max_h=ecfg['max_h'],
+            min_w=ecfg['min_w'], max_w=ecfg['max_w'],
+            min_l=ecfg['min_l'], max_l=ecfg['max_l'],
+            max_center_z=ecfg['max_center_z'],
+        )
+    elif mode == 'point_pillars':
+        from .point_pillars import PointPillarsDetector
         model_path = Path(config['detection']['point_pillars']['model_path'])
         conf_threshold = config['detection']['point_pillars']['conf_threshold']
         nms_threshold = config['detection']['point_pillars']['nms_threshold']
         device = config['detection']['point_pillars']['device']
         return PointPillarsDetector(model_path=model_path, conf_threshold=conf_threshold, nms_threshold=nms_threshold, device=device)
     else:
-        raise ValueError(f"Unknown detector type: {config['detection']['mode']}")
+        raise ValueError(f"Unknown detector type: {mode}")

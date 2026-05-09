@@ -4,29 +4,41 @@ data:
   publish_rate: 10.0
 
 preprocessing:
-  voxel_size: [0.2, 0.2, 0.2]
-  min_points_per_voxel: 5
-  max_points_per_voxel: 20
-  max_voxels: 20000
+  output_topic: "/lidar_perception_tracker/streams/pointcloud_preprocessed"
+  voxel_size: 0.2
+  min_distance: 2.0
+  max_distance: 50.0
+  ground_threshold: 0.2
 
 detection:
-  mode: "point_pillars"
+  output_topic: "/lidar_perception_tracker/streams/detections"
+  mode: "euclidean"
   point_pillars:
     model_path: "models/pointpillars.pth"
     nms_threshold: 0.5
     conf_threshold: 0.5
     device: "cuda"
   euclidean:
-    eps: 0.5
-    min_points: 10
+    eps: 1.259
+    min_points: 12
+    min_h: 0.5
+    max_h: 2.5
+    min_w: 0.3
+    max_w: 2.5
+    min_l: 0.5
+    max_l: 5.5
+    max_center_z: 1.651
   
 tracking:
+  output_topic: "/lidar_perception_tracker/streams/tracks"
   max_age: 5
   min_hits: 3
-  iou_threshold: 0.3
-  max_distance: 2.0
+  match_distance: 2.0
   use_kalman_filter: true
   kalman_process_noise: 1e-5
   kalman_measurement_noise: 1e-2
   kalman_initial_state_covariance: 1.0
   kalman_initial_measurement_covariance: 1.0
+
+evaluation:
+  match_distance: 2.0   # max 3D center distance (m) to count as a true positive

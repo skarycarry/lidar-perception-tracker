@@ -2,7 +2,6 @@
 import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import PointCloud2
-from sensor_msgs_py import point_cloud2
 from std_msgs.msg import Header
 
 from pathlib import Path
@@ -25,14 +24,13 @@ class DetectionNode(Node):
         else:
             self.subscribe_topic = self.config['data']['output_topic']
         self.publisher_ = self.create_publisher(DetectionArray, self.publish_topic, 10)
-        self.subscription = self.create_subscription(PointCloud2, self.subscribe_topic, self.point_cloud_callback, 10)
+        self.subscription = self.create_subscription(PointCloud2, self.subscribe_topic, self.point_cloud_callback, 1)
         self.get_logger().info(f'DetectionNode initialized. Subscribing to {self.subscribe_topic} and publishing to {self.publish_topic}')
 
     def point_cloud_callback(self, msg: PointCloud2):
-        pts_list = list(point_cloud2.read_points(msg, field_names=("x", "y", "z", "intensity"), skip_nans=True))
-        if not pts_list:
+        if msg.width * msg.height == 0:
             return
-        points = np.array([[p[0], p[1], p[2], p[3]] for p in pts_list], dtype=np.float32)
+        points = np.frombuffer(msg.data, dtype=np.float32).reshape(-1, 4)
         
         detections = self.detector.detect(points)
         detections = [

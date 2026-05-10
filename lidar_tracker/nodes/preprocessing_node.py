@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 import rclpy
 from rclpy.node import Node
-from sensor_msgs.msg import PointCloud2
-from sensor_msgs_py import point_cloud2
+from sensor_msgs.msg import PointCloud2, PointField
 from std_msgs.msg import Header
 
 from pathlib import Path
@@ -23,32 +22,38 @@ class PreprocessingNode(Node):
         self.max_distance = self.config['preprocessing']['max_distance']
         self.ground_threshold = self.config['preprocessing']['ground_threshold']
         self.voxel_size = self.config['preprocessing']['voxel_size']
-        self.publisher_ = self.create_publisher(PointCloud2, self.publish_topic, 10)
-        self.subscription = self.create_subscription(PointCloud2, self.subscribe_topic, self.point_cloud_callback, 10)
+        self.publisher_ = self.create_publisher(PointCloud2, self.publish_topic, 1)
+        self.subscription = self.create_subscription(PointCloud2, self.subscribe_topic, self.point_cloud_callback, 1)
         self.get_logger().info(f'PreprocessingNode initialized. Subscribing to {self.subscribe_topic} and publishing to {self.publish_topic}')
 
     def point_cloud_callback(self, msg: PointCloud2):
-        pts_list = list(point_cloud2.read_points(msg, field_names=("x", "y", "z", "intensity"), skip_nans=True))
-        if not pts_list:
+        if msg.width * msg.height == 0:
             return
-        points = np.array([[p[0], p[1], p[2], p[3]] for p in pts_list], dtype=np.float32)
-        
+        points = np.frombuffer(msg.data, dtype=np.float32).reshape(-1, 4)
+
         points = range_crop(points, self.min_distance, self.max_distance)
         points = remove_ground(points, self.ground_threshold)
         points = voxel_downsample(points, self.voxel_size)
-        
-        header = Header()
-        header.stamp = self.get_clock().now().to_msg()
-        header.frame_id = msg.header.frame_id
-        out_msg = point_cloud2.create_cloud(header, fields=[
-            point_cloud2.PointField(name='x', offset=0, datatype=point_cloud2.PointField.FLOAT32, count=1),
-            point_cloud2.PointField(name='y', offset=4, datatype=point_cloud2.PointField.FLOAT32, count=1),
-            point_cloud2.PointField(name='z', offset=8, datatype=point_cloud2.PointField.FLOAT32, count=1),
-            point_cloud2.PointField(name='intensity', offset=12, datatype=point_cloud2.PointField.FLOAT32, count=1),
-        ], points=points)
-        
+
+        n = len(points)
+        out_msg = PointCloud2()
+        out_msg.header.stamp = self.get_clock().now().to_msg()
+        out_msg.header.frame_id = msg.header.frame_id
+        out_msg.height = 1
+        out_msg.width = n
+        out_msg.fields = [
+            PointField(name='x',         offset=0,  datatype=PointField.FLOAT32, count=1),
+            PointField(name='y',         offset=4,  datatype=PointField.FLOAT32, count=1),
+            PointField(name='z',         offset=8,  datatype=PointField.FLOAT32, count=1),
+            PointField(name='intensity', offset=12, datatype=PointField.FLOAT32, count=1),
+        ]
+        out_msg.is_bigendian = False
+        out_msg.point_step = 16
+        out_msg.row_step = 16 * n
+        out_msg.data = points.astype(np.float32).tobytes()
+        out_msg.is_dense = True
         self.publisher_.publish(out_msg)
-        self.get_logger().info(f'Published processed point cloud with {points.shape[0]} points')
+        self.get_logger().info(f'Published processed point cloud with {n} points')
 
 def main(args=None):
     rclpy.init(args=args)

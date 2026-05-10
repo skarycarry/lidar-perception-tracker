@@ -12,8 +12,8 @@ class VisualizationNode(Node):
     def __init__(self):
         super().__init__('visualization_node')
 
-        self.create_subscription(DetectionArray, '/lidar_perception_tracker/streams/detections', self.detection_callback, 10)
-        self.create_subscription(TrackArray, '/lidar_perception_tracker/streams/tracks', self.track_callback, 10)
+        self.create_subscription(DetectionArray, '/lidar_perception_tracker/streams/detections', self.detection_callback, 1)
+        self.create_subscription(TrackArray, '/lidar_perception_tracker/streams/tracks', self.track_callback, 1)
 
         self.detection_pub = self.create_publisher(MarkerArray, '/lidar_perception_tracker/viz/detections', 10)
         self.track_pub = self.create_publisher(MarkerArray, '/lidar_perception_tracker/viz/tracks', 10)

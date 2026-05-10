@@ -38,10 +38,8 @@ def _pillarize(points: np.ndarray):
          (points[:, 2] >= z_min) & (points[:, 2] < z_max))
     pts = points[m]
     if pts.shape[0] == 0:
-        dummy_feats = np.zeros((1, MAX_POINTS, 10), dtype=np.float32)
-        dummy_coords = np.zeros((1, 4), dtype=np.int32)
-        dummy_counts = np.array([0], dtype=np.int32)
-        return dummy_feats, dummy_coords, dummy_counts
+        dummy = np.zeros((1, MAX_POINTS, 10), dtype=np.float32)
+        return dummy, np.zeros((1, 4), dtype=np.int32), np.array([0], dtype=np.int32)
 
     xi = np.clip(((pts[:, 0] - x_min) / dx).astype(np.int32), 0, nx - 1)
     yi = np.clip(((pts[:, 1] - y_min) / dy).astype(np.int32), 0, ny - 1)
@@ -53,42 +51,56 @@ def _pillarize(points: np.ndarray):
 
     unique, counts = np.unique(pillar_idx, return_counts=True)
     if len(unique) > MAX_VOXELS:
-        keep = np.sort(np.random.choice(len(unique), MAX_VOXELS, replace=False))
+        keep   = np.sort(np.random.choice(len(unique), MAX_VOXELS, replace=False))
         unique = unique[keep]
         counts = counts[keep]
 
     n_pillars = len(unique)
-    voxel_features = np.zeros((n_pillars, MAX_POINTS, 10), dtype=np.float32)
-    voxel_coords   = np.zeros((n_pillars, 4), dtype=np.int32)   # [batch, z, y, x]
-    voxel_counts   = np.zeros(n_pillars, dtype=np.int32)
-
     split = np.searchsorted(pillar_idx, unique)
-    z_offset = dz / 2.0 + z_min   # −1.0 for KITTI config
 
-    for i in range(n_pillars):
-        pidx  = unique[i]
-        start = split[i]
-        cnt   = counts[i]
-        n     = min(cnt, MAX_POINTS)
-        p     = pts[start:start + n]              # (n, 4)
+    # --- vectorised feature computation ---
+    # Assign each point a (pillar_id, local_index_within_pillar) pair
+    pillar_assign = np.repeat(np.arange(n_pillars), counts)   # which pillar
+    local_idx     = np.arange(len(pts)) - np.repeat(split, counts)  # 0,1,2… within pillar
 
-        voxel_features[i, :n, :4] = p            # x, y, z, intensity
+    # Keep only up to MAX_POINTS per pillar
+    keep_pt  = local_idx < MAX_POINTS
+    pts_f    = pts[keep_pt]
+    pa_f     = pillar_assign[keep_pt]
+    li_f     = local_idx[keep_pt]
 
-        mean_xyz = p[:, :3].mean(axis=0)
-        voxel_features[i, :n, 4] = p[:, 0] - mean_xyz[0]   # x relative to cluster
-        voxel_features[i, :n, 5] = p[:, 1] - mean_xyz[1]
-        voxel_features[i, :n, 6] = p[:, 2] - mean_xyz[2]
+    # Pillar cluster means (only over kept points)
+    sum_xyz  = np.zeros((n_pillars, 3), dtype=np.float64)
+    np.add.at(sum_xyz, pa_f, pts_f[:, :3])
+    kept_cnt = np.bincount(pa_f, minlength=n_pillars).clip(min=1)
+    mean_xyz = (sum_xyz / kept_cnt[:, None]).astype(np.float32)  # (P, 3)
 
-        pix_x = int(pidx % nx)
-        pix_y = int(pidx // nx)
-        cx = x_min + (pix_x + 0.5) * dx
-        cy = y_min + (pix_y + 0.5) * dy
-        voxel_features[i, :n, 7] = p[:, 0] - cx            # x relative to pillar centre
-        voxel_features[i, :n, 8] = p[:, 1] - cy
-        voxel_features[i, :n, 9] = p[:, 2] - z_offset      # z relative to grid bottom-centre
+    # Pillar centres
+    pix_x = unique % nx
+    pix_y = unique // nx
+    cx    = (x_min + (pix_x + 0.5) * dx).astype(np.float32)   # (P,)
+    cy    = (y_min + (pix_y + 0.5) * dy).astype(np.float32)
+    z_offset = np.float32(dz / 2.0 + z_min)
 
-        voxel_coords[i] = [0, 0, pix_y, pix_x]
-        voxel_counts[i] = n
+    # Build feature matrix for all kept points at once
+    f = np.empty((len(pts_f), 10), dtype=np.float32)
+    f[:, :4] = pts_f                                       # x, y, z, intensity
+    f[:, 4]  = pts_f[:, 0] - mean_xyz[pa_f, 0]            # x − cluster mean
+    f[:, 5]  = pts_f[:, 1] - mean_xyz[pa_f, 1]
+    f[:, 6]  = pts_f[:, 2] - mean_xyz[pa_f, 2]
+    f[:, 7]  = pts_f[:, 0] - cx[pa_f]                     # x − pillar centre
+    f[:, 8]  = pts_f[:, 1] - cy[pa_f]
+    f[:, 9]  = pts_f[:, 2] - z_offset
+
+    # Scatter into (P, MAX_POINTS, 10) output
+    voxel_features         = np.zeros((n_pillars, MAX_POINTS, 10), dtype=np.float32)
+    voxel_features[pa_f, li_f] = f
+
+    voxel_coords       = np.zeros((n_pillars, 4), dtype=np.int32)
+    voxel_coords[:, 2] = pix_y
+    voxel_coords[:, 3] = pix_x
+
+    voxel_counts = kept_cnt.astype(np.int32)
 
     return voxel_features, voxel_coords, voxel_counts
 
@@ -257,9 +269,9 @@ def _decode_boxes(pred, anchor):
     x = dx * diag + xa
     y = dy * diag + ya
     z = dz * ha  + za
-    l = torch.exp(dl.clamp(max=4)) * la
-    w = torch.exp(dw.clamp(max=4)) * wa
-    h = torch.exp(dh.clamp(max=4)) * ha
+    l = torch.exp(dl.clamp(min=-1, max=0.5)) * la
+    w = torch.exp(dw.clamp(min=-1, max=0.5)) * wa
+    h = torch.exp(dh.clamp(min=-1, max=0.5)) * ha
     r = dr + ra
     return torch.stack([x, y, z, l, w, h, r], dim=-1)
 
@@ -352,11 +364,17 @@ class PointPillarsDetector(Detector):
             keep   = _bev_nms(boxes, scores, self.nms_threshold)
             for ki in keep:
                 b = boxes[ki]
+                cx, cy = float(b[0]), float(b[1])
+                # Drop boxes whose near edge is behind the sensor or within 1 m
+                # (anchor grid starts at x=0 so first anchors straddle the origin)
+                l = float(b[3])
+                if cx - l / 2.0 < 1.0:
+                    continue
                 h = float(b[5])
                 detections.append(Detection(
-                    x=float(b[0]), y=float(b[1]),
+                    x=cx, y=cy,
                     z=float(b[2]) - h / 2.0,   # decode gives center z; Detection.z is bottom
-                    length=float(b[3]), width=float(b[4]), height=h,
+                    length=l, width=float(b[4]), height=h,
                     rotation_y=float(b[6]),
                     confidence=float(scores[ki]),
                     object_type=CLASS_NAMES[cls_idx],

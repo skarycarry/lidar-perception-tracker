@@ -1,7 +1,11 @@
 from launch import LaunchDescription
+from launch.actions import DeclareLaunchArgument, RegisterEventHandler, Shutdown
+from launch.event_handlers import OnProcessExit
+from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
 from launch.substitutions import PathJoinSubstitution
+from launch_ros.parameter_descriptions import ParameterValue
 
 
 def generate_launch_description():
@@ -9,7 +13,21 @@ def generate_launch_description():
         FindPackageShare('lidar_perception_tracker'), 'rviz', 'pipeline.rviz'
     ])
 
+    data_node = Node(
+        package='lidar_perception_tracker',
+        executable='data_node',
+        name='data_node',
+        output='screen',
+        parameters=[{
+            'dataset_path': ParameterValue(LaunchConfiguration('dataset_path'), value_type=str),
+        }],
+    )
+
     return LaunchDescription([
+        DeclareLaunchArgument(
+            'dataset_path', default_value='~/kitti_dataset',
+            description='Root path of the KITTI dataset',
+        ),
         Node(
             package='tf2_ros',
             executable='static_transform_publisher',
@@ -29,12 +47,11 @@ def generate_launch_description():
             arguments=['-d', rviz_config],
             output='screen',
         ),
-        Node(
-            package='lidar_perception_tracker',
-            executable='data_node',
-            name='data_node',
-            output='screen',
-        ),
+        data_node,
+        RegisterEventHandler(OnProcessExit(
+            target_action=data_node,
+            on_exit=[Shutdown()],
+        )),
         Node(
             package='lidar_perception_tracker',
             executable='preprocessing_node',

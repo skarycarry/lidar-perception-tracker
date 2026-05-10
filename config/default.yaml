@@ -1,5 +1,6 @@
 data:
   source: "~/kitti_dataset/"
+  sequence: "0000"
   output_topic: "/lidar_perception_tracker/streams/pointcloud"
   publish_rate: 10.0
 
@@ -16,7 +17,7 @@ detection:
   point_pillars:
     model_path: "models/pointpillar_7728.pth"
     nms_threshold: 0.5
-    conf_threshold: 0.8
+    conf_threshold: 0.3
     device: "cuda"
   euclidean:
     eps: 1.259
@@ -41,9 +42,9 @@ tracking:
     min_hits: 3
     match_distance: 2.0
   point_pillars:
-    max_age: 1
-    min_hits: 3
-    match_distance: 1.0
+    max_age: 5
+    min_hits: 1
+    match_distance: 1.5
 
 evaluation:
   match_distance: 2.0   # max 3D center distance (m) to count as a true positive

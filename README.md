@@ -60,8 +60,11 @@ kitti_dataset/
 # Source ROS2 first
 source /opt/ros/jazzy/setup.bash
 
-# Launch the full pipeline
-ros2 launch launch/pipeline.launch.py dataset_path:=~/kitti_dataset
+# Launch the full pipeline (defaults to sequence 0000)
+ros2 launch launch/pipeline.launch.py
+
+# Stream a different sequence
+ros2 launch launch/pipeline.launch.py sequence:=0001 dataset_path:=~/kitti_dataset
 ```
 
 Detection mode is set in `config/default.yaml` under `detection.mode` — either `euclidean` or `point_pillars`.
@@ -102,7 +105,13 @@ pytest tests/
 
 Matching uses 3D centre distance rather than IoU. The threshold (default 2.0 m) is configurable via `tracking.match_distance` and `evaluation.match_distance`.
 
+## Known Limitations
+
+- **No ego-motion compensation** — the tracker operates in sensor frame. As the ego vehicle moves or rotates, stationary objects appear to translate in sensor frame, causing the tracker to spawn new tracks rather than continuing existing ones. The offline MOTA evaluation is unaffected (GT labels are also in sensor frame per timestep), but the live RViz visualization will show phantom track fragmentation during turns. Fix: transform detections to a fixed world frame using ego poses (KITTI raw dataset provides GPS/IMU) before tracking.
+- **Sparse pedestrian detection** — pedestrians return few LiDAR points at range, giving lower prediction confidence than vehicles. Lowering `conf_threshold` reveals more pedestrians at the cost of more false positives on building edges.
+
 ## Future Extensions
 
+- **Ego-motion compensation** — integrate KITTI GPS/IMU poses to track in world frame, eliminating phantom track fragmentation during ego-vehicle motion.
 - **CIoU loss for PointPillars** — replace the standard L1 regression loss with CIoU when training the detection head. Directly optimizes for box overlap quality rather than coordinate error, which should improve MOTA scores.
 - **Semantic segmentation preprocessing** — remove non-object points (road, sidewalk, buildings) before detection rather than only removing the ground plane. Would require a pretrained model as KITTI does not provide point cloud segmentation labels.

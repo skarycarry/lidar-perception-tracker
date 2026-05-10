@@ -11,15 +11,25 @@ import argparse
 import numpy as np
 from pathlib import Path
 
+from dataclasses import dataclass
 from lidar_tracker.core.data.kitti_loader import (
     load_lidar_frames, load_calibration, load_labels, KittiDetection
 )
+from lidar_tracker.core.detection.base import Detection
 from lidar_tracker.core.detection.factory import create_detector
 from lidar_tracker.core.tracking.sort3d import Sort3D
 from lidar_tracker.core.evaluation.metrics import compute_metrics
 from lidar_tracker.core.preprocessing.filters import range_crop, voxel_downsample
 from lidar_tracker.core.preprocessing.ground_filter import remove_ground
+from lidar_tracker.core.preprocessing.ego_motion import EgoMotionEstimator
 import yaml
+
+
+@dataclass
+class _SensorTrack:
+    """Lightweight wrapper that presents a track's position in sensor frame."""
+    track_id: int
+    last_detection: Detection
 
 EVAL_CLASSES = {'Car', 'Van', 'Pedestrian', 'Cyclist'}
 CONFIG_PATH = Path(__file__).parent.parent / 'config' / 'default.yaml'
@@ -101,16 +111,47 @@ def main():
     frame_files = sorted(velodyne_dir.glob('*.bin'))
 
     do_preprocess = detector.needs_external_preprocessing
+    ego_estimator = EgoMotionEstimator()
     print(f'Processing {len(frame_files)} frames... (preprocessing: {do_preprocess})')
     for frame_idx, bin_file in enumerate(frame_files):
         points = np.fromfile(bin_file, dtype=np.float32).reshape(-1, 4)
+
+        # Update cumulative world pose from this frame's point cloud
+        ego_estimator.update(points)
+
         if do_preprocess:
             points = range_crop(points, pre_cfg['min_distance'], pre_cfg['max_distance'])
             points = remove_ground(points, pre_cfg['ground_threshold'])
             points = voxel_downsample(points, pre_cfg['voxel_size'])
         detections = detector.detect(points)
-        tracks = tracker.update(detections, dt=0.1)
-        all_tracks[frame_idx] = list(tracks)
+
+        # Transform detections from current sensor frame into world frame
+        world_dets = []
+        for det in detections:
+            pos_w = ego_estimator.sensor_to_world(det.position)
+            world_dets.append(Detection(
+                x=float(pos_w[0]), y=float(pos_w[1]), z=float(pos_w[2]),
+                width=det.width, length=det.length, height=det.height,
+                rotation_y=det.rotation_y, confidence=det.confidence,
+                object_type=det.object_type,
+            ))
+
+        tracks_world = tracker.update(world_dets, dt=0.1)
+
+        # Convert world-frame track positions back to sensor frame for metrics
+        sensor_tracks = []
+        for t in tracks_world:
+            pos_s = ego_estimator.world_to_sensor(t.state[:3])
+            ld = t.last_detection
+            sensor_ld = Detection(
+                x=float(pos_s[0]), y=float(pos_s[1]), z=float(pos_s[2]),
+                width=ld.width, length=ld.length, height=ld.height,
+                rotation_y=ld.rotation_y, confidence=ld.confidence,
+                object_type=ld.object_type,
+            )
+            sensor_tracks.append(_SensorTrack(track_id=t.track_id, last_detection=sensor_ld))
+
+        all_tracks[frame_idx] = sensor_tracks
         all_detections[frame_idx] = detections
 
     from lidar_tracker.core.evaluation.geometry3d import iou_3d

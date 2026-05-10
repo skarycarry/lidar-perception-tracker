@@ -1,3 +1,4 @@
+import numpy as np
 from .kalman import KalmanFilter3D
 from lidar_tracker.core.detection.base import Detection
 
@@ -20,6 +21,17 @@ class Track:
         self.kalman_filter.predict(dt)
         self.age += 1
         self.time_since_update += 1
+
+    def apply_ego_motion(self, R: np.ndarray, t: np.ndarray) -> None:
+        """Rotate and translate the Kalman state into the new sensor frame."""
+        kf = self.kalman_filter
+        kf.state[:3] = R @ kf.state[:3] + t   # position
+        kf.state[3:6] = R @ kf.state[3:6]     # velocity direction rotates too
+        # Propagate covariance: P' = J P J^T where J = diag(R, R)
+        J = np.zeros((6, 6))
+        J[:3, :3] = R
+        J[3:, 3:] = R
+        kf.P = J @ kf.P @ J.T
 
     def update(self, detection: Detection):
         self.kalman_filter.update(detection.position)

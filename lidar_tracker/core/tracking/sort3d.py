@@ -44,11 +44,33 @@ class Sort3D:
 
             self.tracks = [track for track in self.tracks if not track.is_deleted()]
 
-        return [track for track in self.tracks if track.is_confirmed()]
+        confirmed = [t for t in self.tracks if t.is_confirmed()]
+        return self._suppress_duplicates(confirmed)
 
     def _compute_distances(self, tracks: list[Track], detections: list[Detection]) -> np.ndarray:
         dist_matrix = np.zeros((len(tracks), len(detections)))
         for i, track in enumerate(tracks):
             for j, det in enumerate(detections):
-                dist_matrix[i, j] = float(np.linalg.norm(_center(track.last_detection) - _center(det)))
+                # Use Kalman-predicted position, not last detection
+                dist_matrix[i, j] = float(np.linalg.norm(track.state[:3] - _center(det)))
         return dist_matrix
+
+    def _suppress_duplicates(self, tracks: list[Track]) -> list[Track]:
+        if len(tracks) <= 1:
+            return tracks
+        keep = [True] * len(tracks)
+        positions = np.array([t.state[:3] for t in tracks])
+        for i in range(len(tracks)):
+            if not keep[i]:
+                continue
+            for j in range(i + 1, len(tracks)):
+                if not keep[j]:
+                    continue
+                if np.linalg.norm(positions[i] - positions[j]) < self.match_distance:
+                    # Drop whichever track has fewer confirmed hits
+                    if tracks[i].hits >= tracks[j].hits:
+                        keep[j] = False
+                    else:
+                        keep[i] = False
+                        break
+        return [t for t, k in zip(tracks, keep) if k]

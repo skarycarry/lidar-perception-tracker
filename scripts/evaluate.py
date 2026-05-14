@@ -18,7 +18,9 @@ from lidar_tracker.core.data.kitti_loader import (
 from lidar_tracker.core.detection.base import Detection
 from lidar_tracker.core.detection.factory import create_detector
 from lidar_tracker.core.tracking.sort3d import Sort3D
-from lidar_tracker.core.evaluation.metrics import compute_metrics
+from lidar_tracker.core.evaluation.metrics import (
+    compute_metrics, compute_hota, compute_mt_pt_ml, compute_idf1, compute_per_class,
+)
 from lidar_tracker.core.preprocessing.filters import range_crop, voxel_downsample
 from lidar_tracker.core.preprocessing.ground_filter import remove_ground
 from lidar_tracker.core.preprocessing.ego_motion import EgoMotionEstimator
@@ -31,7 +33,7 @@ class _SensorTrack:
     track_id: int
     last_detection: Detection
 
-EVAL_CLASSES = {'Car', 'Van', 'Pedestrian', 'Cyclist'}
+EVAL_CLASSES = {'Car', 'Pedestrian', 'Cyclist'}  # Van excluded: no PointPillars class support
 CONFIG_PATH = Path(__file__).parent.parent / 'config' / 'default.yaml'
 KITTI_ROOT = Path('~/kitti_dataset').expanduser() / 'training'
 
@@ -222,14 +224,43 @@ def main():
         print(f'    <= 1.0m: {sum(1 for d in finite if d <= 1.0)} / {len(best_dists)}')
         print(f'    <= {match_dist}m: {sum(1 for d in finite if d <= match_dist)} / {len(best_dists)}')
 
-    metrics = compute_metrics(gt_lidar, all_tracks, match_distance=match_dist)
+    metrics  = compute_metrics(gt_lidar, all_tracks, match_distance=match_dist)
+    hota     = compute_hota(gt_lidar, all_tracks)
+    mt_ml    = compute_mt_pt_ml(gt_lidar, all_tracks, match_distance=match_dist)
+    idf1     = compute_idf1(gt_lidar, all_tracks, match_distance=match_dist)
+    per_cls  = compute_per_class(gt_lidar, all_tracks, match_distance=match_dist)
 
-    print('\n--- Evaluation Results ---')
+    print('\n--- HOTA ---')
+    print(f'  HOTA : {hota["HOTA"]:.4f}')
+    print(f'  DetA : {hota["DetA"]:.4f}  (detection quality)')
+    print(f'  AssA : {hota["AssA"]:.4f}  (association / ID continuity)')
+    print(f'  IDF1 : {idf1["IDF1"]:.4f}')
+
+    print('\n--- Track continuity ---')
+    n = mt_ml["GT Tracks"]
+    print(f'  GT Tracks : {n}')
+    print(f'  MT (>=80%): {mt_ml["MT"]:3d}  ({mt_ml["MT%"]*100:5.1f}%)')
+    print(f'  PT (20-80%): {mt_ml["PT"]:3d}  ({(mt_ml["PT"]/n*100) if n else 0:5.1f}%)')
+    print(f'  ML (<=20%): {mt_ml["ML"]:3d}  ({mt_ml["ML%"]*100:5.1f}%)')
+
+    print('\n--- MOTA (reference) ---')
     for k, v in metrics.items():
         if isinstance(v, float):
             print(f'  {k}: {v:.4f}')
         else:
             print(f'  {k}: {v}')
+
+    if per_cls:
+        print('\n--- Per-class breakdown ---')
+        hdr = (f'  {"Class":<12}  {"HOTA":>6}  {"DetA":>6}  {"AssA":>6}  {"IDF1":>6}'
+               f'  {"MOTA":>7}  {"MT%":>6}  {"ML%":>6}  {"GT Trk":>6}  {"IDS":>4}')
+        print(hdr)
+        print(f'  {"-"*87}')
+        for cls, r in sorted(per_cls.items()):
+            print(f'  {cls:<12}  {r["HOTA"]:6.4f}  {r["DetA"]:6.4f}  {r["AssA"]:6.4f}'
+                  f'  {r["IDF1"]:6.4f}  {r["MOTA"]:+7.4f}'
+                  f'  {r["MT%"]*100:5.1f}%  {r["ML%"]*100:5.1f}%'
+                  f'  {r["GT Tracks"]:6}  {int(r["ID Switches"]):4}')
 
 
 if __name__ == '__main__':

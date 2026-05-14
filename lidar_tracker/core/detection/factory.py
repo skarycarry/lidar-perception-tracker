@@ -20,10 +20,21 @@ def create_detector(config_path: Path) -> Detector:
         )
     elif mode == 'point_pillars':
         from .point_pillars import PointPillarsDetector
-        model_path = Path(config['detection']['point_pillars']['model_path'])
-        conf_threshold = config['detection']['point_pillars']['conf_threshold']
-        nms_threshold = config['detection']['point_pillars']['nms_threshold']
-        device = config['detection']['point_pillars']['device']
-        return PointPillarsDetector(model_path=model_path, conf_threshold=conf_threshold, nms_threshold=nms_threshold, device=device)
+        cfg = config['detection']['point_pillars']
+        return PointPillarsDetector(
+            model_path=Path(cfg['model_path']),
+            conf_threshold=cfg['conf_threshold'],
+            nms_threshold=cfg['nms_threshold'],
+            device=cfg['device'],
+        )
+    elif mode in ('second', 'pvrcnn', 'voxel_rcnn'):
+        from .openpcdet_detector import OpenPCDetDetector
+        cfg = config['detection'][mode]
+        return OpenPCDetDetector(
+            cfg_file=Path(cfg['cfg_file']),
+            ckpt_path=Path(cfg['model_path']),
+            conf_threshold=cfg['conf_threshold'],
+            device=cfg['device'],
+        )
     else:
-        raise ValueError(f"Unknown detector type: {mode}")
+        raise ValueError(f"Unknown detector mode: {mode}")

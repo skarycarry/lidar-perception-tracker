@@ -36,6 +36,7 @@ class _SensorTrack:
 EVAL_CLASSES = {'Car', 'Pedestrian', 'Cyclist'}  # Van excluded: no PointPillars class support
 CONFIG_PATH = Path(__file__).parent.parent / 'config' / 'default.yaml'
 KITTI_ROOT = Path('~/kitti_dataset').expanduser() / 'training'
+RANGE_BUCKETS = [(0, 20), (20, 40), (40, float('inf'))]
 
 
 def cam_to_velo(points_cam: np.ndarray, calib) -> np.ndarray:
@@ -72,6 +73,33 @@ def gt_to_lidar(det: KittiDetection, calib) -> KittiDetection:
         z=float(center_velo[2] - det.height / 2.0),  # bottom of box in LiDAR frame
         rotation_y=-det.rotation_y,  # camera Y-down → LiDAR Z-up flips sign
     )
+
+
+def _range_2d(obj) -> float:
+    """XY ground-plane distance from sensor origin."""
+    d = obj.last_detection if hasattr(obj, 'last_detection') else obj
+    return float(np.sqrt(d.x ** 2 + d.y ** 2))
+
+
+def compute_range_breakdown(gt_lidar, all_tracks, match_distance):
+    """Compute HOTA + MOTA per range bucket, filtering GT and tracks by XY distance."""
+    results = {}
+    for r_min, r_max in RANGE_BUCKETS:
+        gt_b = {
+            f: [d for d in dets if r_min <= _range_2d(d) < r_max]
+            for f, dets in gt_lidar.items()
+        }
+        gt_b = {f: d for f, d in gt_b.items() if d}
+        tr_b = {
+            f: [t for t in tracks if r_min <= _range_2d(t) < r_max]
+            for f, tracks in all_tracks.items()
+        }
+        label = f'{r_min}–{int(r_max)}m' if r_max != float('inf') else f'{r_min}m+'
+        h = compute_hota(gt_b, tr_b)
+        m = compute_metrics(gt_b, tr_b, match_distance=match_distance)
+        gt_count = sum(len(v) for v in gt_b.values())
+        results[label] = {**h, **m, 'GT Dets': gt_count}
+    return results
 
 
 def main():
@@ -261,6 +289,17 @@ def main():
                   f'  {r["IDF1"]:6.4f}  {r["MOTA"]:+7.4f}'
                   f'  {r["MT%"]*100:5.1f}%  {r["ML%"]*100:5.1f}%'
                   f'  {r["GT Tracks"]:6}  {int(r["ID Switches"]):4}')
+
+    range_bd = compute_range_breakdown(gt_lidar, all_tracks, match_distance=match_dist)
+    print('\n--- Range-stratified breakdown ---')
+    hdr = (f'  {"Range":<10}  {"HOTA":>6}  {"DetA":>6}  {"AssA":>6}'
+           f'  {"MOTA":>7}  {"FP":>6}  {"FN":>6}  {"GT Dets":>7}  {"IDS":>4}')
+    print(hdr)
+    print(f'  {"-"*71}')
+    for label, r in range_bd.items():
+        print(f'  {label:<10}  {r["HOTA"]:6.4f}  {r["DetA"]:6.4f}  {r["AssA"]:6.4f}'
+              f'  {r["MOTA"]:+7.4f}  {int(r["False Positives"]):6}  {int(r["False Negatives"]):6}'
+              f'  {int(r["GT Dets"]):7}  {int(r["ID Switches"]):4}')
 
 
 if __name__ == '__main__':

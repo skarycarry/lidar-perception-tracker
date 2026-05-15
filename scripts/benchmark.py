@@ -14,6 +14,7 @@ Usage:
 """
 import argparse
 import sys
+import time
 import numpy as np
 from dataclasses import dataclass
 from pathlib import Path
@@ -33,10 +34,11 @@ from lidar_tracker.core.preprocessing.filters import range_crop, voxel_downsampl
 from lidar_tracker.core.preprocessing.ground_filter import remove_ground
 from lidar_tracker.core.preprocessing.ego_motion import EgoMotionEstimator
 
-CONFIG_PATH  = Path(__file__).parent.parent / 'config' / 'default.yaml'
-KITTI_ROOT   = Path('~/kitti_dataset').expanduser() / 'training'
-EVAL_CLASSES = {'Car', 'Pedestrian', 'Cyclist'}
-DEFAULT_NMS  = [0.5, 1.0, 1.5, 2.0, 2.5]
+CONFIG_PATH   = Path(__file__).parent.parent / 'config' / 'default.yaml'
+KITTI_ROOT    = Path('~/kitti_dataset').expanduser() / 'training'
+EVAL_CLASSES  = {'Car', 'Pedestrian', 'Cyclist'}
+DEFAULT_NMS   = [0.5, 1.0, 1.5, 2.0, 2.5]
+RANGE_BUCKETS = [(0, 20, '0–20m'), (20, 40, '20–40m'), (40, float('inf'), '40m+')]
 
 
 @dataclass
@@ -120,7 +122,31 @@ def _to_world(dets, R_ws, t_ws):
     return out
 
 
-def _track_and_eval(gt_lidar, world_dets_by_frame, ego_cache, trk_cfg, eval_md):
+def _range_2d(obj) -> float:
+    d = obj.last_detection if hasattr(obj, 'last_detection') else obj
+    return float(np.sqrt(d.x ** 2 + d.y ** 2))
+
+
+def _add_range_breakdown(result: dict, gt_lidar: dict, all_tracks: dict, eval_md: float):
+    """Append range-stratified HOTA/DetA/FP/FN to result dict using prefixed keys."""
+    for r_min, r_max, label in RANGE_BUCKETS:
+        gt_b = {f: [d for d in dets if r_min <= _range_2d(d) < r_max]
+                for f, dets in gt_lidar.items()}
+        gt_b = {f: d for f, d in gt_b.items() if d}
+        tr_b = {f: [t for t in tracks if r_min <= _range_2d(t) < r_max]
+                for f, tracks in all_tracks.items()}
+        h = compute_hota(gt_b, tr_b)
+        m = compute_metrics(gt_b, tr_b, match_distance=eval_md)
+        p = f'range_{label}_'
+        result[f'{p}HOTA'] = h['HOTA']
+        result[f'{p}DetA'] = h['DetA']
+        result[f'{p}FP']   = m['False Positives']
+        result[f'{p}FN']   = m['False Negatives']
+        result[f'{p}GT']   = m['Total GT']
+
+
+def _track_and_eval(gt_lidar, world_dets_by_frame, ego_cache, trk_cfg, eval_md,
+                    range_breakdown: bool = True):
     """Run Sort3D on cached world-frame detections; convert tracks back to sensor frame for eval."""
     tracker = Sort3D(
         max_age=trk_cfg['max_age'],
@@ -148,7 +174,10 @@ def _track_and_eval(gt_lidar, world_dets_by_frame, ego_cache, trk_cfg, eval_md):
     m   = compute_metrics(gt_lidar, all_tracks, match_distance=eval_md)
     mt  = compute_mt_pt_ml(gt_lidar, all_tracks, match_distance=eval_md)
     idf = compute_idf1(gt_lidar, all_tracks, match_distance=eval_md)
-    return {**h, **m, **mt, **idf}
+    result = {**h, **m, **mt, **idf}
+    if range_breakdown:
+        _add_range_breakdown(result, gt_lidar, all_tracks, eval_md)
+    return result
 
 
 # ── Joint PP + PV-RCNN evaluation (shared detection pass) ────────────────────
@@ -169,6 +198,8 @@ def _detect_sequence(seq, pp_det, pv_det, config):
     ego_cache:  dict[int, tuple] = {}
     pp_world:   dict[int, list]  = {}
     pv_world:   dict[int, list]  = {}
+    pp_times:   list[float]      = []
+    pv_times:   list[float]      = []
 
     for fi, f in enumerate(frame_files):
         pts = np.fromfile(f, dtype=np.float32).reshape(-1, 4)
@@ -176,10 +207,17 @@ def _detect_sequence(seq, pp_det, pv_det, config):
         R_ws, t_ws = ego.R_ws.copy(), ego.t_ws.copy()
         ego_cache[fi] = (R_ws, t_ws)
 
+        t0 = time.perf_counter()
         pp_world[fi] = _to_world(pp_det.detect(pts), R_ws, t_ws)
-        pv_world[fi] = _to_world(pv_det.detect(pts), R_ws, t_ws)
+        pp_times.append(time.perf_counter() - t0)
 
-    return gt_lidar, ego_cache, pp_world, pv_world
+        t0 = time.perf_counter()
+        pv_world[fi] = _to_world(pv_det.detect(pts), R_ws, t_ws)
+        pv_times.append(time.perf_counter() - t0)
+
+    pp_ms = float(np.mean(pp_times)) * 1000
+    pv_ms = float(np.mean(pv_times)) * 1000
+    return gt_lidar, ego_cache, pp_world, pv_world, pp_ms, pv_ms
 
 
 def benchmark_joint(config, sequences, nms_vals):
@@ -215,20 +253,27 @@ def benchmark_joint(config, sequences, nms_vals):
 
     for seq in sequences:
         try:
-            gt_lidar, ego_cache, pp_world, pv_world = _detect_sequence(
+            gt_lidar, ego_cache, pp_world, pv_world, pp_ms, pv_ms = _detect_sequence(
                 seq, pp_det, pv_det, config)
 
             r_pp = _track_and_eval(gt_lidar, pp_world, ego_cache, pp_trk, eval_md)
+            r_pp['ms_per_frame'] = pp_ms
             r_pv = _track_and_eval(gt_lidar, pv_world, ego_cache, pv_trk, eval_md)
+            r_pv['ms_per_frame'] = pv_ms
             seq_results = {'point_pillars': r_pp, 'pvrcnn': r_pv}
 
             all_frames = set(pp_world) | set(pv_world)
             for nms_d, key in zip(nms_vals, fusion_keys):
+                t0 = time.perf_counter()
                 fused = {
                     fi: _nms(pp_world.get(fi, []) + pv_world.get(fi, []), nms_d)
                     for fi in all_frames
                 }
-                seq_results[key] = _track_and_eval(gt_lidar, fused, ego_cache, fu_trk, eval_md)
+                nms_ms = (time.perf_counter() - t0) * 1000 / max(len(all_frames), 1)
+                r_fu = _track_and_eval(gt_lidar, fused, ego_cache, fu_trk, eval_md,
+                                       range_breakdown=False)
+                r_fu['ms_per_frame'] = pp_ms + pv_ms + nms_ms
+                seq_results[key] = r_fu
 
             for mode, r in seq_results.items():
                 totals.setdefault(mode, {})
@@ -270,6 +315,7 @@ def _eval_sequence_standalone(seq, detector, mode, config):
     ego = EgoMotionEstimator()
     ego_cache:   dict[int, tuple] = {}
     world_dets_by_frame: dict[int, list] = {}
+    det_times: list[float] = []
 
     for fi, f in enumerate(frame_files):
         pts = np.fromfile(f, dtype=np.float32).reshape(-1, 4)
@@ -281,9 +327,14 @@ def _eval_sequence_standalone(seq, detector, mode, config):
             det_pts = range_crop(det_pts, pre_cfg['min_distance'], pre_cfg['max_distance'])
             det_pts = remove_ground(det_pts, pre_cfg['ground_threshold'])
             det_pts = voxel_downsample(det_pts, pre_cfg['voxel_size'])
+        t0 = time.perf_counter()
         world_dets_by_frame[fi] = _to_world(detector.detect(det_pts), R_ws, t_ws)
+        det_times.append(time.perf_counter() - t0)
 
-    return _track_and_eval(gt_lidar, world_dets_by_frame, ego_cache, trk_cfg, eval_md=config['evaluation']['match_distance'])
+    r = _track_and_eval(gt_lidar, world_dets_by_frame, ego_cache, trk_cfg,
+                        eval_md=config['evaluation']['match_distance'])
+    r['ms_per_frame'] = float(np.mean(det_times)) * 1000
+    return r
 
 
 def benchmark_standalone(mode, config, sequences):
@@ -324,21 +375,24 @@ def _print_table(results: dict[str, dict], nms_vals: list[float]):
         default=None,
     )
 
-    W = 112
+    W = 124
     print(f'\n\n{"═"*W}')
     print(f'{"BENCHMARK — averaged across sequences":^{W}}')
     print(f'{"═"*W}')
     hdr = (f'{"Detector":<18}  {"HOTA":>7}  {"DetA":>7}  {"AssA":>7}  {"IDF1":>7}  '
-           f'{"MOTA":>7}  {"MT%":>6}  {"ML%":>6}  {"IDS":>5}  {"FP":>7}  {"FN":>7}  {"N":>3}')
+           f'{"MOTA":>7}  {"MT%":>6}  {"ML%":>6}  {"IDS":>5}  {"FP":>7}  {"FN":>7}'
+           f'  {"ms/frame":>8}  {"N":>3}')
     print(hdr)
     print(f'{"─"*W}')
 
     def _row(label, r, marker=''):
+        ms = r.get('ms_per_frame', float('nan'))
+        ms_str = f'{ms:>8.1f}' if not np.isnan(ms) else f'{"—":>8}'
         return (f'{label+marker:<18}  {r["HOTA"]:>7.4f}  {r["DetA"]:>7.4f}  {r["AssA"]:>7.4f}'
                 f'  {r["IDF1"]:>7.4f}  {r["MOTA"]:>+7.4f}'
                 f'  {r["MT%"]*100:>5.1f}%  {r["ML%"]*100:>5.1f}%'
                 f'  {int(r["ID Switches"]):>5}  {int(r["False Positives"]):>7}'
-                f'  {int(r["False Negatives"]):>7}  {int(r["n_sequences"]):>3}')
+                f'  {int(r["False Negatives"]):>7}  {ms_str}  {int(r["n_sequences"]):>3}')
 
     # Non-fusion rows first
     for mode, r in results.items():
@@ -357,6 +411,30 @@ def _print_table(results: dict[str, dict], nms_vals: list[float]):
             print(f'\n  * best fusion NMS distance by HOTA')
 
     print(f'{"═"*W}')
+
+    # Range-stratified table (non-fusion detectors only)
+    range_modes = [m for m in results if m not in fusion_keys
+                   and any(f'range_{label}_HOTA' in results[m]
+                           for _, _, label in RANGE_BUCKETS)]
+    if range_modes:
+        RW = 72
+        print(f'\n{"═"*RW}')
+        print(f'{"RANGE-STRATIFIED BREAKDOWN — averaged across sequences":^{RW}}')
+        print(f'{"═"*RW}')
+        rhdr = (f'{"Detector":<18}  {"Range":<8}  {"HOTA":>6}  {"DetA":>6}'
+                f'  {"FN":>6}  {"FP":>6}  {"GT Dets":>7}')
+        print(rhdr)
+        print(f'{"─"*RW}')
+        for mode in range_modes:
+            r = results[mode]
+            for _, _, label in RANGE_BUCKETS:
+                p = f'range_{label}_'
+                if f'{p}HOTA' not in r:
+                    continue
+                print(f'{mode:<18}  {label:<8}  {r[f"{p}HOTA"]:>6.4f}  {r[f"{p}DetA"]:>6.4f}'
+                      f'  {int(r[f"{p}FN"]):>6}  {int(r[f"{p}FP"]):>6}  {int(r[f"{p}GT"]):>7}')
+            print(f'{"─"*RW}')
+        print(f'{"═"*RW}')
 
 
 # ── Entry point ────────────────────────────────────────────────────────────────

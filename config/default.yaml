@@ -21,6 +21,8 @@ detection:
     device: cuda
     model_path: models/pointpillar_7728.pth
     nms_threshold: 0.5
+  fusion:
+    nms_distance: 1.5
   pvrcnn:
     cfg_file: models/pvrcnn.yaml
     conf_threshold: 0.8
@@ -49,6 +51,10 @@ tracking:
     match_distance: 2.0
     max_age: 5
     min_hits: 3
+  fusion:
+    match_distance: 2.583
+    max_age: 6
+    min_hits: 5
   kalman_initial_measurement_covariance: 1.0
   kalman_initial_state_covariance: 1.0
   kalman_measurement_noise: 1e-2

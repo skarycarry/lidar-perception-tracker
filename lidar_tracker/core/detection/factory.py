@@ -36,5 +36,25 @@ def create_detector(config_path: Path) -> Detector:
             conf_threshold=cfg['conf_threshold'],
             device=cfg['device'],
         )
+    elif mode == 'fusion':
+        from .point_pillars import PointPillarsDetector
+        from .openpcdet_detector import OpenPCDetDetector
+        from .fusion import FusionDetector
+        pp_cfg = config['detection']['point_pillars']
+        pv_cfg = config['detection']['pvrcnn']
+        fu_cfg = config['detection']['fusion']
+        pp = PointPillarsDetector(
+            model_path=Path(pp_cfg['model_path']),
+            conf_threshold=pp_cfg['conf_threshold'],
+            nms_threshold=pp_cfg['nms_threshold'],
+            device=pp_cfg['device'],
+        )
+        pv = OpenPCDetDetector(
+            cfg_file=Path(pv_cfg['cfg_file']),
+            ckpt_path=Path(pv_cfg['model_path']),
+            conf_threshold=pv_cfg['conf_threshold'],
+            device=pv_cfg['device'],
+        )
+        return FusionDetector([pp, pv], nms_distance=fu_cfg['nms_distance'])
     else:
         raise ValueError(f"Unknown detector mode: {mode}")

@@ -55,21 +55,42 @@ The `lidar_tracker/core/` layer is pure Python with zero ROS imports and is full
 
 Averaged across all 21 KITTI training sequences (Car + Pedestrian + Cyclist).
 
-| Detector | HOTA | DetA | AssA | IDF1 | MOTA | MT% | ML% | IDS | FP | FN |
-|---|---|---|---|---|---|---|---|---|---|---|
-| Euclidean | 0.2053 | 0.0666 | 0.7029 | 0.1010 | −5.996 | 18.5% | 43.6% | 47 | 9641 | 1071 |
-| PointPillars | 0.4591 | 0.3143 | 0.7002 | 0.3734 | +0.077 | 15.5% | 35.2% | 33 | 578 | 1199 |
-| PV-RCNN | **0.5734** | **0.4020** | **0.8460** | **0.5087** | +0.047 | **32.1%** | **30.7%** | 73 | 1051 | **770** |
-| Fusion (PP+PV, NMS 1.0m) | 0.5569 | 0.3928 | 0.8216 | 0.4876 | +0.003 | 32.3% | 30.9% | 73 | 1125 | 767 |
+| Detector | HOTA | DetA | AssA | IDF1 | MOTA | MT% | ML% | IDS | FP | FN | ms/frame |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| Euclidean | 0.2019 | 0.0668 | 0.6709 | 0.0992 | −5.990 | 17.6% | 43.5% | 48 | 9634 | 1070 | 113.8 |
+| PointPillars | 0.4591 | 0.3143 | 0.7002 | 0.3734 | +0.077 | 15.5% | 35.2% | 33 | 578 | 1199 | **34.8** |
+| PV-RCNN | **0.5732** | **0.4020** | **0.8457** | **0.5085** | +0.047 | **32.1%** | **30.7%** | 73 | 1050 | **770** | 139.4 |
+| Fusion (PP+PV, NMS 1.0m) | 0.5564 | 0.3927 | 0.8203 | 0.4871 | +0.003 | 32.2% | 30.9% | 73 | 1125 | 767 | 174.2 |
 
 **Key observations:**
 
-- **Euclidean clustering** has near-zero DetA (0.07) because DBSCAN produces thousands of false positives from noise and building edges — its strong AssA (0.70) shows the tracker itself works, the detector is the bottleneck.
-- **PointPillars** is competitive (HOTA 0.46) with far fewer FPs than Euclidean, but misses ~430 more objects than PV-RCNN.
-- **PV-RCNN** achieves the best HOTA and AssA. The slightly negative-trending MOTA is a KITTI annotation artefact: GT labels only cover objects meeting strict visibility/size/range criteria, but PV-RCNN correctly detects real objects outside those criteria (counted as FP against GT). HOTA handles this more fairly.
-- **Fusion (PP+PV-RCNN with NMS)** does not improve over PV-RCNN alone — the two models fail on largely the same objects (FN overlap ~95%), so fusion adds PP's FPs without recovering meaningful FNs. This is the expected result when one model clearly dominates; ensembling helps only when failure modes are complementary.
+- **Euclidean clustering** has near-zero DetA (0.07) because DBSCAN produces thousands of false positives from noise and building edges — its strong AssA (0.67) shows the tracker itself works well when given clean detections; the detector is the bottleneck. Surprisingly slow at 113.8 ms/frame due to Open3D RANSAC ground removal dominating runtime.
+- **PointPillars** is competitive (HOTA 0.46) at only 34.8 ms/frame — 4× faster than PV-RCNN. Precision is excellent (only 578 FP) but it misses ~430 more objects than PV-RCNN, especially at range.
+- **PV-RCNN** achieves the best HOTA and AssA. The slightly positive MOTA (+0.047) is notable: GT labels only cover objects meeting strict visibility/size/range criteria, but PV-RCNN correctly detects real objects outside those criteria (counted as FP against GT), which would push MOTA negative — the positive score means HOTA's approach to handling detection quality is more meaningful here.
+- **Fusion (PP+PV-RCNN with NMS)** does not improve over PV-RCNN alone — the two models fail on largely the same objects (FN overlap ~95%), so fusion only adds PP's false positives without recovering meaningful misses. Ensembling helps only when failure modes are complementary; these two models are not.
 
-> Tracker hyperparameters (match\_distance, max\_age, min\_hits) were tuned per-detector using Bayesian optimisation over 1000 trials with HOTA as the objective.
+### Range-stratified breakdown
+
+| Detector | Range | HOTA | DetA | FN | FP | GT Dets |
+|---|---|---|---|---|---|---|
+| Euclidean | 0–20 m | 0.3209 | 0.1539 | 416 | 1914 | 828 |
+| Euclidean | 20–40 m | 0.2398 | 0.0803 | 342 | 3935 | 739 |
+| Euclidean | 40 m+ | 0.1451 | 0.0420 | 312 | 1151 | 370 |
+| PointPillars | 0–20 m | 0.6115 | 0.4804 | 396 | 269 | 828 |
+| PointPillars | 20–40 m | 0.4912 | 0.3574 | 417 | 172 | 739 |
+| PointPillars | 40 m+ | 0.2124 | 0.1042 | 332 | 9 | 370 |
+| PV-RCNN | 0–20 m | 0.6318 | 0.4733 | 280 | 427 | 828 |
+| PV-RCNN | 20–40 m | 0.6264 | 0.4679 | 224 | 379 | 739 |
+| PV-RCNN | 40 m+ | **0.5088** | **0.3718** | 214 | 46 | 370 |
+
+**Key findings:**
+
+- **Close range (0–20 m):** PointPillars and PV-RCNN are nearly equivalent in HOTA (0.61 vs 0.63). PP actually has *fewer* FPs (269 vs 427), making it the better precision choice at short range.
+- **Medium range (20–40 m):** PV-RCNN pulls ahead significantly (0.63 vs 0.49). PP's DetA drops from 0.48 to 0.36.
+- **Long range (40 m+):** The gap is decisive — PV-RCNN maintains 0.51 HOTA while PP collapses to 0.21. PV-RCNN's voxel feature extraction and RCNN refinement stage preserve enough signal from sparse distant point clouds; PP's pillar-based encoding degrades sharply. PP's FP count at 40 m+ drops to nearly zero (9), meaning it simply stops detecting rather than hallucinating.
+- **Euclidean** degrades consistently at all ranges due to uncontrolled FPs from building edges and ground-removal artifacts, though FN counts are similar to the learned methods.
+
+> Tracker hyperparameters (match\_distance, max\_age, min\_hits) were tuned per-detector using Bayesian optimisation (Optuna, 1000 trials) with HOTA as the objective.
 
 ---
 
